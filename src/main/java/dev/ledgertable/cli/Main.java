@@ -7,7 +7,8 @@ import picocli.CommandLine.Command;
         description = "Transactional usage-metering table on object storage.",
         subcommands = {
                 HarnessCommand.class, IngestCommand.class, CompactCommand.class, QueryCommand.class,
-                StatementCommand.class, CorrectionsCommand.class, LogCommand.class, ExportCommand.class
+                StatementCommand.class, CorrectionsCommand.class, LogCommand.class, ExportCommand.class,
+                BenchCommand.class
         })
 public final class Main implements Runnable {
     public static void main(String[] args) {
