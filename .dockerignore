@@ -1,0 +1,6 @@
+target
+.minio
+work
+py/.venv
+**/__pycache__
+.git
