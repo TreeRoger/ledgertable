@@ -1,6 +1,6 @@
 # LedgerTable
 
-[![ci](https://github.com/OWNER/ledgertable/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/ledgertable/actions/workflows/ci.yml)
+[![ci](https://github.com/TreeRoger/ledgertable/actions/workflows/ci.yml/badge.svg)](https://github.com/TreeRoger/ledgertable/actions/workflows/ci.yml)
 
 **A transactional table layer for usage metering on object storage, where no usage record is ever lost or billed twice.**
 
@@ -163,7 +163,7 @@ docker compose run --rm ledger make demo
 - Chaos run: 12 more high-fault seeds (100-111), the real-process SIGKILL test, and the demo.
 - A second job builds the Docker image and runs `make test` inside Docker Compose.
 
-The workflow passes `actionlint`, but it has **not run yet**; the badge goes live once the repo is pushed. Replace `OWNER` in the badge URL with the GitHub account that hosts it.
+The workflow passes `actionlint`, but it has **not run yet**; the badge goes live after the first push.
 
 ## Limits
 
@@ -195,3 +195,7 @@ py/ledger/   workload.py, tablelog.py (independent log replay), checker.py, chao
 py/tests/    checker tamper tests, randomized seeds (local + S3), real-process SIGKILL test
 bench/       results/*.csv (raw), results/summary.md, plots/*.png
 ```
+
+## License
+
+[MIT](LICENSE)
