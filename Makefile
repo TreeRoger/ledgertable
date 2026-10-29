@@ -2,18 +2,19 @@
 SHELL := /bin/bash
 MVN ?= mvn
 UV ?= uv
-PY := py/.venv/bin/python
+# Stamp file for the synced Python env; the interpreter itself may be a symlink to a system Python.
+PYENV := py/.venv/.synced
 JAR := target/ledgertable.jar
 export LEDGER_S3_ENDPOINT ?= http://127.0.0.1:9000
 
 .PHONY: build test test-java test-py bench demo minio clean docker-build docker-test docker-bench docker-demo
 
-build: $(PY)
+build: $(PYENV)
 	$(MVN) -q package -DskipTests
 
-$(PY): py/pyproject.toml py/uv.lock
+$(PYENV): py/pyproject.toml py/uv.lock
 	cd py && $(UV) sync --frozen -q
-	@touch $(PY)
+	@touch $(PYENV)
 
 minio:
 	scripts/minio.sh
