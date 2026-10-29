@@ -8,6 +8,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,7 +27,7 @@ public final class History implements AutoCloseable {
     }
 
     public static long now() {
-        var instant = java.time.Instant.now();
+        var instant = Instant.now();
         return instant.getEpochSecond() * 1_000_000_000L + instant.getNano();
     }
 

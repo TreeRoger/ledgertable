@@ -15,10 +15,6 @@ public record TableOptions(int checkpointInterval, int maxCommitAttempts, long m
         return new TableOptions(interval, maxCommitAttempts, maxBackoffMicros, clock);
     }
 
-    public TableOptions withMaxBackoffMicros(long micros) {
-        return new TableOptions(checkpointInterval, maxCommitAttempts, micros, clock);
-    }
-
     public TableOptions withClock(LongSupplier newClock) {
         return new TableOptions(checkpointInterval, maxCommitAttempts, maxBackoffMicros, newClock);
     }

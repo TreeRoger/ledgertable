@@ -91,10 +91,6 @@ public final class SnapshotQuery implements AutoCloseable {
         return rows;
     }
 
-    public Connection connection() {
-        return connection;
-    }
-
     private Path localFile(String key) throws IOException {
         var local = store.localPath(key);
         if (local.isPresent()) {
