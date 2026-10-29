@@ -29,6 +29,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -318,6 +319,107 @@ class LedgerTableTest {
         @Override
         public List<String> list(String prefix, String startAfter) throws IOException {
             return delegate.list(prefix, startAfter).stream().filter(k -> !k.equals(hidden)).toList();
+        }
+
+        @Override
+        public void delete(String key) throws IOException {
+            delegate.delete(key);
+        }
+    }
+
+    @Test
+    void ambiguousWriteToAVersionAnotherWriterTookIsNotClaimed() throws Exception {
+        table.append("p", 1, TestEvents.batch("p", 1, 2));
+        // Our put of version 2 fails without landing, and meanwhile a rival commits version 2.
+        var fired = new AtomicBoolean();
+        var flaky = new FaultInjectingObjectStore(store, (op, key) -> {
+            if (op == Op.PUT_IF_ABSENT && key.equals(LogKeys.commit(2)) && fired.compareAndSet(false, true)) {
+                try {
+                    LedgerTable.open(store).append("rival", 1, TestEvents.batch("rival", 1, 3));
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+                return StorageFault.ERROR_BEFORE;
+            }
+            return StorageFault.NONE;
+        });
+        var r = LedgerTable.open(flaky).append("p", 2, TestEvents.batch("p", 2, 2));
+        assertEquals(new CommitResult(3, false, 2), r, "version 2 exists but holds the rival's txn, so we rebase to 3");
+        assertEquals("rival", table.readCommit(2).orElseThrow().producer().producerId());
+        assertEquals("p", table.readCommit(3).orElseThrow().producer().producerId());
+        assertEquals(7, table.latestSnapshot().rowCount());
+    }
+
+    @Test
+    void producerDedupStateSurvivesCompactionAndCheckpoints() throws Exception {
+        var t = LedgerTable.open(store, TableOptions.DEFAULT.withCheckpointInterval(5), Faults.NONE);
+        for (int seq = 1; seq <= 3; seq++) {
+            t.append("p", seq, TestEvents.batch("p", seq, 4));                    // v1-v3
+        }
+        assertEquals(CompactionResult.Status.COMPACTED, t.compact(100, 10).status()); // v4 rewrites p's files
+        t.append("q", 1, TestEvents.batch("q", 1, 4));                             // v5, checkpointed
+        assertTrue(store.get(LogKeys.checkpoint(5)).isPresent());
+
+        // Serve only commit 0, the checkpoint and later commits, so the producer state can only come from the checkpoint.
+        var fromCheckpoint = LedgerTable.open(new HidingStore(store, k -> {
+            var v = LogKeys.parseCommit(k);
+            return v.isPresent() && v.getAsLong() >= 1 && v.getAsLong() <= 4;
+        }));
+        var retry = fromCheckpoint.append("p", 3, TestEvents.batch("p", 3, 4));
+        assertEquals(new CommitResult(3, true, 0), retry, "the retried batch is recognised, with its original version");
+        assertTrue(fromCheckpoint.append("p", 2, TestEvents.batch("p", 2, 4)).duplicate());
+        assertThrows(OutOfOrderBatchException.class, () -> fromCheckpoint.append("p", 5, TestEvents.batch("p", 5, 1)));
+        assertEquals(new CommitResult(6, false, 1), fromCheckpoint.append("p", 4, TestEvents.batch("p", 4, 4)));
+        assertEquals(20, t.latestSnapshot().rowCount());
+    }
+
+    @Test
+    void retriedBatchRacingPastACheckpointIsDeduplicatedDuringRebase() throws Exception {
+        var options = TableOptions.DEFAULT.withCheckpointInterval(2);
+        var t = LedgerTable.open(store, options, Faults.NONE);
+        t.append("p", 1, TestEvents.batch("p", 1, 2));
+        // A stalled process for p reads v1, then p's restarted process commits batch 2 at v2 (a checkpoint)
+        // and other writers move on; when the stalled one finally writes, it must rebase into a duplicate.
+        var fired = new AtomicBoolean();
+        var stalled = new FaultInjectingObjectStore(store, (op, key) -> {
+            if (op == Op.PUT_IF_ABSENT && key.equals(LogKeys.commit(2)) && fired.compareAndSet(false, true)) {
+                try {
+                    var restarted = LedgerTable.open(store, options, Faults.NONE);
+                    restarted.append("p", 2, TestEvents.batch("p", 2, 2));
+                    restarted.append("q", 1, TestEvents.batch("q", 1, 2));
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+            return StorageFault.NONE;
+        });
+        var r = LedgerTable.open(stalled, options, Faults.NONE).append("p", 2, TestEvents.batch("p", 2, 2));
+        assertTrue(store.get(LogKeys.checkpoint(2)).isPresent());
+        assertEquals(new CommitResult(2, true, 1), r);
+        assertEquals(6, t.latestSnapshot().rowCount());
+        assertEquals(3, t.latestSnapshot().version());
+    }
+
+    /** Hides matching keys from both reads and listings. */
+    private record HidingStore(ObjectStore delegate, Predicate<String> hidden) implements ObjectStore {
+        @Override
+        public boolean putIfAbsent(String key, byte[] data) throws IOException {
+            return delegate.putIfAbsent(key, data);
+        }
+
+        @Override
+        public void put(String key, byte[] data) throws IOException {
+            delegate.put(key, data);
+        }
+
+        @Override
+        public Optional<byte[]> get(String key) throws IOException {
+            return hidden.test(key) ? Optional.empty() : delegate.get(key);
+        }
+
+        @Override
+        public List<String> list(String prefix, String startAfter) throws IOException {
+            return delegate.list(prefix, startAfter).stream().filter(k -> !hidden.test(k)).toList();
         }
 
         @Override
