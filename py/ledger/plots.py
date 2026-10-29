@@ -48,10 +48,11 @@ def stores(rows: list[dict]) -> list[str]:
     return [s for s in STORE_LABEL if any(r["store"] == s for r in rows)]
 
 
-def line(ax, xs, ys, color, label):
+def line(ax, xs, ys, color, label, direct_label=True):
     ax.plot(xs, ys, color=color, marker="o", markeredgecolor=SURFACE, markeredgewidth=2, label=label)
-    ax.annotate(label, (xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points", va="center",
-                color=INK_SECONDARY, fontsize=9)
+    if direct_label:
+        ax.annotate(label, (xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points", va="center",
+                    color=INK_SECONDARY, fontsize=9)
 
 
 def commit_scaling(results: Path, plots: Path, md: list[str]) -> None:
@@ -172,14 +173,15 @@ def checkpoints(results: Path, plots: Path, md: list[str]) -> None:
             ls = sorted(by_len)
             ys = [statistics.median(by_len[n]) for n in ls]
             label = "no checkpoints" if interval == "0" else f"every {interval}"
-            line(ax, ls, ys, SERIES[i], label)
+            # The two checkpointed lines nearly coincide, so only the outlier is labelled at its end.
+            line(ax, ls, ys, SERIES[i], label, direct_label=interval == "0")
             for n, y in zip(ls, ys):
                 md.append(f"| {STORE_LABEL[store]} | {label} | {n} | {y:.1f} |")
         ax.set_title(f"Snapshot load time - {STORE_LABEL[store]}", loc="left")
         ax.set_xlabel("commits in log")
-        ax.set_ylabel("ms (median)")
-        ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left")
+        ax.set_ylabel("ms (median, log scale)")
+        ax.set_yscale("log")
+        ax.legend(loc="best")
     fig.tight_layout()
     fig.savefig(plots / "checkpoint_load.png", dpi=150)
     plt.close(fig)

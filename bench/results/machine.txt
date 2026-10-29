@@ -1,0 +1,6 @@
+date: 2026-10-29T03:36:00Z
+os: Darwin 25.3.0 arm64
+cpu: Apple M4 (10 cores)
+memory: 16 GiB
+java: openjdk version "21.0.13.0.3" 2026-10-24
+s3: MinIO at http://127.0.0.1:9000 (minio version RELEASE.2025-10-15T17-29-55Z (commit-id=9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a))
