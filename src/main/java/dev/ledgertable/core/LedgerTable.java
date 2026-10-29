@@ -75,9 +75,9 @@ public final class LedgerTable {
         OptionalLong hint = readCheckpointHint();
         List<String> keys = store.list(LogKeys.VERSIONED_PREFIX,
                 hint.isPresent() ? LogKeys.versionPrefix(hint.getAsLong()) : "");
-        Optional<Snapshot> snapshot = replay(keys, Long.MAX_VALUE);
+        Optional<Snapshot> snapshot = replay(keys, Long.MAX_VALUE, false);
         if (snapshot.isEmpty() && hint.isPresent()) {
-            snapshot = replay(store.list(LogKeys.VERSIONED_PREFIX), Long.MAX_VALUE);
+            snapshot = replay(store.list(LogKeys.VERSIONED_PREFIX), Long.MAX_VALUE, false);
         }
         return snapshot.orElseThrow(() -> new CorruptLogException("table has no version 0"));
     }
@@ -87,7 +87,7 @@ public final class LedgerTable {
         if (version < 0) {
             throw new NoSuchElementException("no version " + version);
         }
-        Snapshot s = replay(store.list(LogKeys.VERSIONED_PREFIX), version)
+        Snapshot s = replay(store.list(LogKeys.VERSIONED_PREFIX), version, true)
                 .orElseThrow(() -> new CorruptLogException("table has no version 0"));
         if (s.version() != version) {
             throw new NoSuchElementException("no version " + version + "; latest is " + s.version());
@@ -132,22 +132,29 @@ public final class LedgerTable {
     }
 
     /**
-     * Rebuilds the state at the newest version {@code <= maxVersion} from a sorted listing of log
-     * keys: start from the newest usable checkpoint, then apply every later commit in order.
+     * Rebuilds the state at the newest version {@code <= maxVersion}: start from the newest
+     * checkpoint, then apply every later commit in order.
+     *
+     * <p>The listing is used only to find the newest checkpoint and commit. A listing taken while
+     * writers commit can skip keys created during it (POSIX {@code readdir} and paginated S3 lists
+     * both allow this), so it may show version {@code v+1} without {@code v}. Commits are therefore
+     * fetched by key, which is strongly consistent: since a writer only creates {@code v+1} after
+     * reading {@code v}, every version below a listed one must exist.
+     *
+     * @param probe keep fetching versions past the newest listed one, up to {@code maxVersion}
      */
-    private Optional<Snapshot> replay(List<String> keys, long maxVersion) throws IOException {
+    private Optional<Snapshot> replay(List<String> keys, long maxVersion, boolean probe) throws IOException {
         long checkpointVersion = -1;
-        var commitVersions = new ArrayList<Long>();
+        long newest = -1;
         for (String key : keys) {
             OptionalLong cp = LogKeys.parseCheckpoint(key);
             if (cp.isPresent() && cp.getAsLong() <= maxVersion) {
-                checkpointVersion = cp.getAsLong();
+                checkpointVersion = Math.max(checkpointVersion, cp.getAsLong());
             }
-            LogKeys.parseCommit(key).ifPresent(v -> {
-                if (v <= maxVersion) {
-                    commitVersions.add(v);
-                }
-            });
+            OptionalLong v = LogKeys.parseCommit(key);
+            if (v.isPresent() && v.getAsLong() <= maxVersion) {
+                newest = Math.max(newest, v.getAsLong());
+            }
         }
         Snapshot base = Snapshot.EMPTY;
         if (checkpointVersion >= 0) {
@@ -157,16 +164,19 @@ public final class LedgerTable {
         }
         var builder = new Snapshot.Builder(base);
         long applied = base.version();
-        for (long v : commitVersions) {
-            if (v <= applied) {
-                continue;
+        for (long v = applied + 1; v <= maxVersion; v++) {
+            Optional<Commit> c = readCommit(v);
+            if (c.isEmpty()) {
+                if (v <= newest) {
+                    throw new CorruptLogException("commit " + v + " is missing below listed commit " + newest);
+                }
+                break;
             }
-            if (v != applied + 1) {
-                throw new CorruptLogException("log gap: version " + (applied + 1) + " missing before " + v);
-            }
-            Commit c = readCommit(v).orElseThrow(() -> new CorruptLogException("listed commit vanished: " + v));
-            builder.apply(c);
+            builder.apply(c.get());
             applied = v;
+            if (v >= newest && !probe) {
+                break;
+            }
         }
         if (applied < 0) {
             return Optional.empty();

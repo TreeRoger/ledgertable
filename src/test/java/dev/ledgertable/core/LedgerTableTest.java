@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -267,6 +268,62 @@ class LedgerTableTest {
         var retry = lost.append("p", 1, TestEvents.batch("p", 1, 2));
         assertTrue(retry.duplicate());
         assertEquals(2, table.latestSnapshot().rowCount());
+    }
+
+    @Test
+    void listingThatSkipsAConcurrentlyCreatedCommitIsTolerated() throws Exception {
+        for (int seq = 1; seq <= 4; seq++) {
+            table.append("p", seq, TestEvents.batch("p", seq, 1));
+        }
+        // readdir and paginated S3 listings may omit a key created while the listing ran.
+        ObjectStore skipping = new ListingSkipsStore(store, LogKeys.commit(2));
+        var t = LedgerTable.open(skipping);
+        assertEquals(4, t.latestSnapshot().rowCount());
+        assertEquals(2, t.snapshotAt(2).rowCount());
+        assertEquals(5, t.append("p", 5, TestEvents.batch("p", 5, 1)).version());
+    }
+
+    @Test
+    void timeTravelFindsAVersionTheListingMissed() throws Exception {
+        table.append("p", 1, TestEvents.batch("p", 1, 1));
+        var t = LedgerTable.open(new ListingSkipsStore(store, LogKeys.commit(1)));
+        assertEquals(1, t.snapshotAt(1).rowCount());
+    }
+
+    @Test
+    void missingCommitBelowAListedOneIsCorruption() throws Exception {
+        table.append("p", 1, TestEvents.batch("p", 1, 1));
+        table.append("p", 2, TestEvents.batch("p", 2, 1));
+        store.delete(LogKeys.commit(1));
+        assertThrows(CorruptLogException.class, table::latestSnapshot);
+    }
+
+    /** Hides one key from listings while still serving it by key. */
+    private record ListingSkipsStore(ObjectStore delegate, String hidden) implements ObjectStore {
+        @Override
+        public boolean putIfAbsent(String key, byte[] data) throws IOException {
+            return delegate.putIfAbsent(key, data);
+        }
+
+        @Override
+        public void put(String key, byte[] data) throws IOException {
+            delegate.put(key, data);
+        }
+
+        @Override
+        public Optional<byte[]> get(String key) throws IOException {
+            return delegate.get(key);
+        }
+
+        @Override
+        public List<String> list(String prefix, String startAfter) throws IOException {
+            return delegate.list(prefix, startAfter).stream().filter(k -> !k.equals(hidden)).toList();
+        }
+
+        @Override
+        public void delete(String key) throws IOException {
+            delegate.delete(key);
+        }
     }
 
     @Test
