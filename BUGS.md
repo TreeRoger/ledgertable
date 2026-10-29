@@ -37,3 +37,11 @@ One producer thread died on the `CorruptLogException`. Its remaining batches wer
 **Root cause.** The harness's reader opened the table outside its retry loop, so a single injected storage error during `LedgerTable.open` killed the reader thread. The table behaved correctly. The bug was in the test client.
 
 **Fix** (made before the harness was first committed in `942526c`). The reader opens the table lazily inside the loop that already retries `IOException`, like the producers and compactors do.
+
+## 3. On Linux, compactors and readers barely overlap with the producers (harness bug, found by CI)
+
+**Found by:** the first GitHub Actions run. Every local randomized seed failed its coverage assertion with `compactions == 0`. The checker test that tears a version read also failed, because the history had no version reads with more than two events.
+
+**Root cause.** The harness ran each producer's batches back to back, so the run lasted only as long as the commits did. On this Mac an fsync takes about 3.7 ms and a run lasts about 5 s. Linux fsync is much cheaper, so the same run finished in under a second. That was about as long as Parquet and DuckDB take to load on first use. A compaction makes about 20 store calls, each with a 5% chance of a crash and a 5% chance of an error, so few attempts succeed. In that short window, almost none did. The table was correct: the checker passed every run. What the runs failed to do was exercise compaction concurrently with ingestion. Turning fsync off on the Mac reproduced this, with 0 or 1 compactions per run.
+
+**Fix.** The harness loads Parquet and DuckDB before starting the clients. Each producer now waits a random, seeded 0–100 ms between batches (`--max-batch-pause-ms`), which stands in for the time a real producer spends collecting its next batch. With fsync still turned off, the failing seeds now run for about 1.4 s and complete 26 to 47 compactions each. The existing assertions that every randomized run crashes processes and compacts files are the regression check.

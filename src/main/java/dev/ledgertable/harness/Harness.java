@@ -9,6 +9,7 @@ import dev.ledgertable.core.TableOptions;
 import dev.ledgertable.core.UsageEvent;
 import dev.ledgertable.fault.Faults;
 import dev.ledgertable.fault.SimulatedCrash;
+import dev.ledgertable.io.ParquetCodec;
 import dev.ledgertable.query.SnapshotQuery;
 import dev.ledgertable.store.ObjectStore;
 
@@ -35,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class Harness {
 
     public record Config(long seed, int compactors, int readers, FaultPlan faults, int checkpointInterval,
-                         long smallFileRows, int maxCompactionFiles) {
+                         long smallFileRows, int maxCompactionFiles, int maxBatchPauseMillis) {
     }
 
     private final ObjectStore store;
@@ -53,7 +54,7 @@ public final class Harness {
     /** Runs to completion; returns false if any client hit an error that a correct table can never produce. */
     public boolean run(Map<String, List<Batch>> workload) throws Exception {
         TableOptions options = TableOptions.DEFAULT.withCheckpointInterval(config.checkpointInterval());
-        LedgerTable.open(store, options, Faults.NONE);
+        warmUp(LedgerTable.open(store, options, Faults.NONE));
         history.record("start", "seed", config.seed(), "producers", workload.size(), "compactors", config.compactors(),
                 "readers", config.readers(), "crash_rate", config.faults().crashRate(),
                 "error_rate", config.faults().errorRate(), "checkpoint_interval", config.checkpointInterval());
@@ -64,8 +65,12 @@ public final class Harness {
         int index = 0;
         for (var entry : workload.entrySet()) {
             long seed = config.seed() * 1_000_003 + index++;
-            var loop = new ProducerLoop(store, options, config.faults(), seed, history, entry.getKey(), entry.getValue(), Faults.NONE);
-            producers.add(pool.submit(loop::run));
+            var loop = new ProducerLoop(store, options, config.faults(), seed, history, entry.getKey(), entry.getValue(),
+                    config.maxBatchPauseMillis(), Faults.NONE);
+            producers.add(pool.submit(() -> {
+                loop.run();
+                return null;
+            }));
         }
         for (int c = 0; c < config.compactors(); c++) {
             long seed = config.seed() * 7_000_003 + c;
@@ -92,6 +97,18 @@ public final class Harness {
         }
         history.record("final", "version", fin.version());
         return healthy;
+    }
+
+    /**
+     * Loads Parquet and DuckDB before the clients start. Their first use takes most of a second,
+     * and where fsync is cheap the producers can finish in that time, so compactors and readers
+     * would otherwise barely overlap with them.
+     */
+    private static void warmUp(LedgerTable table) throws IOException, SQLException {
+        ParquetCodec.decode(ParquetCodec.encode(List.of(new UsageEvent("warm-up", "acct", "res", 1, 0))));
+        try (var q = SnapshotQuery.empty(table)) {
+            q.query("SELECT 1");
+        }
     }
 
     private boolean await(List<Future<?>> futures) throws InterruptedException {

@@ -46,10 +46,14 @@ final class HarnessCommand implements Callable<Integer> {
     @Option(names = "--max-compaction-files", defaultValue = "6")
     int maxCompactionFiles;
 
+    @Option(names = "--max-batch-pause-ms", defaultValue = "100",
+            description = "Each producer waits a random 0..N ms between batches, so the run lasts long enough for compactors and readers to overlap with it.")
+    int maxBatchPauseMillis;
+
     @Override
     public Integer call() throws Exception {
         var config = new Harness.Config(seed, compactors, readers, new FaultPlan(crashRate, errorRate),
-                checkpointInterval, smallFileRows, maxCompactionFiles);
+                checkpointInterval, smallFileRows, maxCompactionFiles, maxBatchPauseMillis);
         try (var s = store.open(); var h = new History(history)) {
             return new Harness(s, config, h).run(Workload.load(workload)) ? 0 : 2;
         }

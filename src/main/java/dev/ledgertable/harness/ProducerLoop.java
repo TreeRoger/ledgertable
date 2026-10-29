@@ -11,6 +11,7 @@ import dev.ledgertable.store.ObjectStore;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Random;
 
 /**
  * Drives one producer through its batches the way a real ingestion client would: on an error it
@@ -25,13 +26,15 @@ public final class ProducerLoop {
     private final History history;
     private final String producer;
     private final List<Batch> batches;
+    private final int maxBatchPauseMillis;
     private final Faults extraFaults;
 
     /**
+     * @param maxBatchPauseMillis upper bound of the random pause between batches, which stands in for the time a real producer spends collecting its next batch
      * @param extraFaults crash-point hook applied on top of the random plan (the demo uses it to pause a writer mid-commit)
      */
     public ProducerLoop(ObjectStore store, TableOptions options, FaultPlan plan, long seed, History history,
-                        String producer, List<Batch> batches, Faults extraFaults) {
+                        String producer, List<Batch> batches, int maxBatchPauseMillis, Faults extraFaults) {
         this.store = store;
         this.options = options;
         this.plan = plan;
@@ -39,10 +42,12 @@ public final class ProducerLoop {
         this.history = history;
         this.producer = producer;
         this.batches = batches;
+        this.maxBatchPauseMillis = maxBatchPauseMillis;
         this.extraFaults = extraFaults;
     }
 
-    public void run() {
+    public void run() throws InterruptedException {
+        var rng = new Random(seed);
         int next = -1;
         for (int incarnation = 1; next < batches.size(); incarnation++) {
             String process = producer + "#" + incarnation;
@@ -65,6 +70,9 @@ public final class ProducerLoop {
                         history.record("ok", "op", "append", "process", process, "producer", producer, "seq", batch.seq(),
                                 "version", r.version(), "duplicate", r.duplicate(), "attempts", r.attempts());
                         next++;
+                        if (maxBatchPauseMillis > 0) {
+                            Thread.sleep(rng.nextInt(maxBatchPauseMillis + 1));
+                        }
                     } catch (IOException | CommitFailedException e) {
                         history.record("info", "op", "append", "process", process, "producer", producer, "seq", batch.seq(),
                                 "error", e.toString());

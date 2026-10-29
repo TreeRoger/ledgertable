@@ -64,7 +64,7 @@ final class IngestCommand implements Callable<Integer> {
         };
         var options = TableOptions.DEFAULT.withCheckpointInterval(checkpointInterval);
         try (var s = store.open(); var h = new History(history)) {
-            new ProducerLoop(s, options, FaultPlan.NONE, seed, h, producer, batches, pause).run();
+            new ProducerLoop(s, options, FaultPlan.NONE, seed, h, producer, batches, 0, pause).run();
         }
         System.out.println("DONE " + producer);
         return 0;
