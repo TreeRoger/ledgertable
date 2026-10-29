@@ -43,10 +43,12 @@ jobs:
         run: make test-java
       - name: Python tests (checker, randomized seeds on local FS and S3, SIGKILL chaos)
         run: make test-py
+        env:
+          PYTEST_ADDOPTS: --basetemp=../work/pytest
       - name: Chaos run (high fault rate seeds, real-process SIGKILL test, demo)
         run: |
           cd py
-          LEDGER_SEEDS=100-111 .venv/bin/python -m pytest -q tests/test_randomized.py tests/test_process_kill.py
+          LEDGER_SEEDS=100-111 .venv/bin/python -m pytest -q --basetemp=../work/chaos tests/test_randomized.py tests/test_process_kill.py
           .venv/bin/python -m ledger.demo --work ../work/demo
       - name: Keep failing runs
         if: failure()

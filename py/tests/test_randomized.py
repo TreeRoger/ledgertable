@@ -5,8 +5,11 @@ process's fault schedule; thread interleavings still vary between runs, so a fai
 replayed by rerunning its seed, possibly a few times. Each failure prints the exact commands.
 """
 
+import json
 import os
+import re
 import uuid
+from collections import Counter
 
 import pytest
 
@@ -24,6 +27,18 @@ def replay_hint(seed: int, extra: tuple) -> str:
             f"--seed {seed} {' '.join(map(str, extra))}")
 
 
+def compaction_outcomes(hist) -> str:
+    """Says what the compactors did instead of compacting, for runs that never compacted."""
+    outcomes = Counter()
+    for line in hist.read_text().splitlines():
+        e = json.loads(line)
+        if e.get("op") == "compact" and e["type"] != "invoke":
+            outcomes[e.get("status") or e["type"] + ": " + re.sub(r"[0-9a-f-]{8,}", "*", e.get("error", ""))] += 1
+        elif e["type"] == "crash" and e["process"].startswith("compactor"):
+            outcomes["crash: " + re.sub(r"[0-9a-f-]{8,}", "*", e["error"])] += 1
+    return "compaction outcomes:\n" + "\n".join(f"  {n:4} {o}" for o, n in outcomes.most_common(15))
+
+
 @pytest.mark.parametrize("seed", seeds())
 def test_random_faults_local(seed, tmp_path):
     extra = ("--crash-rate", 0.05, "--error-rate", 0.05, "--compactors", 2, "--readers", 2,
@@ -31,7 +46,7 @@ def test_random_faults_local(seed, tmp_path):
     wl, hist, table = run_harness(tmp_path, seed, workload.WorkloadSpec(seed=seed, **SPEC), *extra)
     report = check(wl, [hist], table)
     assert report.ok, "\n".join(report.violations[:20] + [replay_hint(seed, extra)])
-    assert report.stats["history.crash"] > 0 and report.stats["compactions"] > 0
+    assert report.stats["history.crash"] > 0 and report.stats["compactions"] > 0, compaction_outcomes(hist)
 
 
 @pytest.mark.skipif(not os.environ.get("LEDGER_S3_ENDPOINT"), reason="LEDGER_S3_ENDPOINT not set")
