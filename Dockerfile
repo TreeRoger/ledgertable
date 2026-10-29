@@ -1,4 +1,10 @@
+# MinIO no longer publishes community images or binaries, so the test server is built from source.
+FROM golang:1.24.8 AS minio
+COPY scripts/install-minio.sh /install-minio.sh
+RUN CGO_ENABLED=0 /install-minio.sh
+
 FROM maven:3.9.9-eclipse-temurin-21
+COPY --from=minio /go/bin/minio /usr/local/bin/minio
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv make curl \

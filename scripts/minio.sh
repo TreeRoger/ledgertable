@@ -11,7 +11,7 @@ if healthy; then
 fi
 case "$ENDPOINT" in
   http://127.0.0.1:*|http://localhost:*)
-    command -v minio >/dev/null || { echo "minio not found; install it or point LEDGER_S3_ENDPOINT elsewhere" >&2; exit 1; }
+    command -v minio >/dev/null || { echo "minio not found; run scripts/install-minio.sh or point LEDGER_S3_ENDPOINT elsewhere" >&2; exit 1; }
     PORT="${ENDPOINT##*:}"
     mkdir -p "$DATA_DIR"
     MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \

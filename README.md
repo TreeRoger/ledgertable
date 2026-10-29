@@ -13,11 +13,12 @@ The core is Java 21: Parquet, the commit protocol, the DuckDB query layer, and t
 ```bash
 make build   # shaded jar + Python env (needs JDK 21, Maven, uv)
 make test    # starts a throwaway MinIO, runs Java tests on local FS and S3, then the Python checker suites
+             # (needs a `minio` binary on PATH: scripts/install-minio.sh builds the pinned one with Go >= 1.24)
 make bench   # benchmarks on local FS and MinIO -> bench/results/*.csv, bench/plots/*.png
 make demo    # concurrent ingestion, writers killed mid-commit, concurrent compaction, reconciliation, time travel
 ```
 
-`make docker-test` / `docker-bench` / `docker-demo` run the same targets inside Docker Compose with a MinIO service (see [Docker](#docker)).
+`make docker-test` / `docker-bench` / `docker-demo` run the same targets inside Docker (see [Docker](#docker)).
 
 Query any snapshot with SQL:
 
@@ -144,7 +145,7 @@ All numbers come from **one machine**: an Apple M4 laptop (10 cores, 16 GiB), ma
 
 ## Docker
 
-The `Dockerfile` builds everything (JDK 21, Maven, Python via uv). `docker-compose.yml` adds a pinned MinIO service and points `LEDGER_S3_ENDPOINT` at it.
+The `Dockerfile` builds everything: JDK 21, Maven, Python via uv, and MinIO built from source at the pinned commit. The make targets start MinIO inside the container, so Compose needs no separate MinIO service.
 
 ```bash
 docker compose run --rm ledger make test    # or: make docker-test
@@ -158,10 +159,10 @@ docker compose run --rm ledger make demo
 
 `.github/workflows/ci.yml` runs on Ubuntu 24.04:
 
-- Start a MinIO container. It is started with `docker run` rather than as a `services:` entry, because service containers cannot pass the `server /data` arguments the official image needs.
+- Build MinIO from source at a pinned commit with `scripts/install-minio.sh`, cached between runs, and start it. MinIO stopped publishing community Docker images and binaries in late 2025, so the `minio/minio` image can no longer be pulled.
 - Build, then run all Java tests (local FS and S3) and all Python tests.
 - Chaos run: 12 more high-fault seeds (100-111), the real-process SIGKILL test, and the demo.
-- A second job builds the Docker image and runs `make test` inside Docker Compose.
+- A second job builds the Docker image and runs `make test` inside it.
 
 The workflow passes `actionlint`, but it has **not run yet**; the badge goes live after the first push.
 
