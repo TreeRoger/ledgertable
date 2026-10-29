@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import random
 import signal
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,7 +37,7 @@ def run(table: Path, workload: Path, producers: list[str], work: Path, seed: int
 
     def start_compactor():
         return javacli.spawn("compact", "--table", table, "--small-file-rows", 400, "--max-files", 6,
-                             "--duration-seconds", timeout_s)
+                             "--duration-seconds", timeout_s, stdout=subprocess.DEVNULL)
 
     writers = {p: start_writer(p) for p in producers}
     compactor = start_compactor()

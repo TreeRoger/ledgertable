@@ -29,5 +29,6 @@ def run(*args: object, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(command(*args), check=check, capture_output=True, text=True)
 
 
-def spawn(*args: object, **kwargs) -> subprocess.Popen:
-    return subprocess.Popen(command(*args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs)
+def spawn(*args: object, stdout=subprocess.PIPE) -> subprocess.Popen:
+    """Starts the CLI; pass a file or DEVNULL as stdout for long-running processes nobody reads from."""
+    return subprocess.Popen(command(*args), stdout=stdout, stderr=subprocess.STDOUT, text=True)

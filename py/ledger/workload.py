@@ -9,6 +9,7 @@ introduced by the table, not by the input.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import random
 from dataclasses import dataclass
@@ -58,6 +59,11 @@ def generate(spec: WorkloadSpec) -> list[dict]:
                 events.append([event_id, account, resource, compute_millis, event_time])
             batches.append({"producer": producer, "seq": seq, "events": events})
     return batches
+
+
+def days_since_epoch(iso_day: str) -> int:
+    """UTC day number of a YYYY-MM-DD date, matching event_time // DAY_MS."""
+    return (dt.date.fromisoformat(iso_day) - dt.date(1970, 1, 1)).days
 
 
 def write(batches: list[dict], path: Path) -> None:
